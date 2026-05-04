@@ -113,6 +113,17 @@ void AppServer::start()
     res.set_content(response.dump(), "application/json");
   });
 
+  server.Get("/api/alarms/sounds", [this](const httplib::Request&, httplib::Response& res) {
+    auto response = nlohmann::json{{"success", true}, {"sounds", alarmService.getAvailableSounds()}};
+    res.set_content(response.dump(), "application/json");
+  });
+
+  server.Post("/api/alarms/fire", [this](const httplib::Request&, httplib::Response& res) {
+    alarmService.playFireAlarm();
+    auto response = nlohmann::json{{"success", true}, {"soundType", "fire_alarm"}};
+    res.set_content(response.dump(), "application/json");
+  });
+
   server.Post("/api/alarms/config", [this](const httplib::Request& req, httplib::Response& res) {
     auto payload = nlohmann::json::parse(req.body, nullptr, false);
     if (payload.is_discarded()) {
@@ -153,6 +164,8 @@ void AppServer::start()
   std::cout << "  GET    /api/schedule/all" << std::endl;
   std::cout << "  GET    /api/schedule/current" << std::endl;
   std::cout << "  GET    /api/alarms/config" << std::endl;
+  std::cout << "  GET    /api/alarms/sounds" << std::endl;
+  std::cout << "  POST   /api/alarms/fire" << std::endl;
   std::cout << "  POST   /api/alarms/config" << std::endl;
   std::cout << "  POST   /api/alarms/schedule-type" << std::endl;
   std::cout << "  GET    /api/alarms/current" << std::endl;

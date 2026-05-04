@@ -30,7 +30,7 @@ std::string getEnvValue(const char* name, const char* fallback)
 
 int getPortFromEnv()
 {
-  return std::atoi(getEnvValue("PORT", "5000").c_str());
+  return std::atoi(getEnvValue("PORT", "4000").c_str());
 }
 }
 

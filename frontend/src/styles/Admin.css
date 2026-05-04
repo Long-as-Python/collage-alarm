@@ -127,6 +127,24 @@
   color: white;
 }
 
+.plain-btn.emergency {
+  width: 100%;
+  border-color: #b91c1c;
+  background: #dc2626;
+  color: white;
+  font-weight: 700;
+}
+
+.plain-btn.emergency:hover {
+  background: #991b1b;
+  color: white;
+}
+
+.emergency-card {
+  border-color: #fecaca;
+  background: #fff7f7;
+}
+
 .plain-btn.small {
   padding: 6px 10px;
   font-size: 12px;
