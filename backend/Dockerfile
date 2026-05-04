@@ -6,6 +6,7 @@ RUN apt-get update && apt-get install -y \
   alsa-utils \
   build-essential \
   cmake \
+  curl \
   git \
   pulseaudio-utils \
   sound-theme-freedesktop \

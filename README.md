@@ -14,6 +14,9 @@ Collage Alarm is a small college bell scheduling system with a C++ HTTP backend 
 │   ├── public/
 │   └── src/
 ├── docker-compose.yml   # Backend + frontend development stack
+├── docker-compose.macos-audio.yml  # macOS Docker sound bridge override
+├── docker-compose.linux-audio.yml  # Linux ALSA device override
+├── scripts/             # Local helper scripts
 └── test-backend.ps1     # Windows backend connectivity smoke test
 ```
 
@@ -112,6 +115,20 @@ Services:
 
 The default Compose file is portable and starts on macOS, Windows, and Linux. It does not expose host sound devices.
 
+For sound on macOS while the backend runs in Docker, start the host sound bridge in one terminal:
+
+```bash
+python3 scripts/macos-sound-bridge.py
+```
+
+Then start Docker Compose with the macOS audio override in another terminal:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.macos-audio.yml up --build
+```
+
+The override makes the Linux container call the bridge through `host.docker.internal`, and the bridge plays sounds on the Mac with `afplay`.
+
 On Linux hosts with ALSA devices, start with the audio override:
 
 ```bash
@@ -122,7 +139,7 @@ The Linux override exposes the host ALSA device to the backend container:
 
 - `/dev/snd:/dev/snd`
 
-Docker Desktop on macOS and Windows does not expose host audio devices the same way. For actual speaker output on macOS, run the backend directly on the host so it can use the built-in `afplay` fallback.
+Docker Desktop on macOS and Windows does not expose host audio devices the same way. For actual speaker output on macOS, use the bridge above or run the backend directly on the host so it can use the built-in `afplay` fallback.
 
 If a Linux host uses PulseAudio or PipeWire Pulse and you want `paplay` instead of the ALSA fallback, add the host Pulse socket and cookie mounts for that deployment and set `PULSE_SERVER`.
 
