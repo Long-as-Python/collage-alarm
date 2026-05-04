@@ -1,0 +1,28 @@
+FROM mcr.microsoft.com/windows/servercore:ltsc2022 as builder
+
+WORKDIR /app
+
+# Install build tools
+RUN powershell -Command \
+  Invoke-WebRequest -Uri https://github.com/Kitware/CMake/releases/download/v3.24.0/cmake-3.24.0-windows-x86_64.msi -OutFile cmake.msi; \
+  Start-Process msiexec.exe -ArgumentList '/i cmake.msi /quiet' -Wait; \
+  Remove-Item cmake.msi
+
+# Copy source
+COPY . .
+
+# Build
+RUN powershell -Command \
+  mkdir build -Force; \
+  cd build; \
+  cmake .. -G "Visual Studio 17 2022"; \
+  cmake --build . --config Release
+
+# Runtime stage
+FROM mcr.microsoft.com/windows/servercore:ltsc2022
+
+WORKDIR /app
+COPY --from=builder /app/build/Release/collage-alarm.exe .
+
+EXPOSE 5000
+CMD ["collage-alarm.exe"]
