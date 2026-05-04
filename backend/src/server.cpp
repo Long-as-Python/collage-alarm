@@ -42,18 +42,16 @@ void AppServer::start()
 
   httplib::Server server;
 
-  server.set_post_routing_handler([](const httplib::Request&, httplib::Response& res) {
+  server.set_post_routing_handler([](const httplib::Request& req, httplib::Response& res) {
     addCorsHeaders(res);
   });
 
   server.Options(R"(/api/.*)", [](const httplib::Request&, httplib::Response& res) {
-    addCorsHeaders(res);
     res.status = 204;
   });
 
   server.Post("/api/auth/login", [this](const httplib::Request&, httplib::Response& res) {
     auto response = authService.loginStudent();
-    addCorsHeaders(res);
     res.set_content(response.dump(), "application/json");
   });
 
@@ -61,19 +59,16 @@ void AppServer::start()
     auto payload = nlohmann::json::parse(req.body, nullptr, false);
     if (payload.is_discarded() || !payload.contains("password") || !payload["password"].is_string()) {
       auto response = nlohmann::json{{"success", false}, {"error", "Некоректний запит"}};
-      addCorsHeaders(res);
       res.set_content(response.dump(), "application/json");
       return;
     }
 
     auto response = authService.loginAdmin(payload["password"].get<std::string>());
-    addCorsHeaders(res);
     res.set_content(response.dump(), "application/json");
   });
 
   server.Get("/api/auth/verify", [this](const httplib::Request&, httplib::Response& res) {
     auto response = nlohmann::json{{"success", true}};
-    addCorsHeaders(res);
     res.set_content(response.dump(), "application/json");
   });
 
@@ -84,7 +79,6 @@ void AppServer::start()
       {"full", scheduleService.getFullSchedule()},
       {"short", scheduleService.getShortSchedule()}
     };
-    addCorsHeaders(res);
     res.set_content(response.dump(), "application/json");
   });
 
@@ -95,13 +89,11 @@ void AppServer::start()
       {"scheduleType", scheduleType},
       {"schedule", scheduleService.getScheduleByType(scheduleType)}
     };
-    addCorsHeaders(res);
     res.set_content(response.dump(), "application/json");
   });
 
   server.Get("/api/alarms/config", [this](const httplib::Request&, httplib::Response& res) {
     auto response = alarmService.getConfig();
-    addCorsHeaders(res);
     res.set_content(response.dump(), "application/json");
   });
 
@@ -109,7 +101,6 @@ void AppServer::start()
     auto payload = nlohmann::json::parse(req.body, nullptr, false);
     if (payload.is_discarded()) {
       auto response = nlohmann::json{{"success", false}, {"error", "Некоректний JSON"}};
-      addCorsHeaders(res);
       res.status = 400;
       res.set_content(response.dump(), "application/json");
       return;
@@ -117,7 +108,6 @@ void AppServer::start()
 
     alarmService.setConfig(payload);
     auto response = nlohmann::json{{"success", true}, {"config", alarmService.getConfig()}};
-    addCorsHeaders(res);
     res.set_content(response.dump(), "application/json");
   });
 
@@ -125,7 +115,6 @@ void AppServer::start()
     auto payload = nlohmann::json::parse(req.body, nullptr, false);
     if (payload.is_discarded() || !payload.contains("scheduleType") || !payload["scheduleType"].is_string()) {
       auto response = nlohmann::json{{"success", false}, {"error", "Некоректний запит"}};
-      addCorsHeaders(res);
       res.status = 400;
       res.set_content(response.dump(), "application/json");
       return;
@@ -133,13 +122,11 @@ void AppServer::start()
 
     alarmService.setScheduleType(payload["scheduleType"].get<std::string>());
     auto response = nlohmann::json{{"success", true}, {"config", alarmService.getConfig()}};
-    addCorsHeaders(res);
     res.set_content(response.dump(), "application/json");
   });
 
   server.Get("/api/alarms/current", [](const httplib::Request&, httplib::Response& res) {
     auto response = nlohmann::json{{"success", true}, {"time", currentTimeString()}};
-    addCorsHeaders(res);
     res.set_content(response.dump(), "application/json");
   });
 
