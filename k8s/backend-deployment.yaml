@@ -1,0 +1,65 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  namespace: collage-alarm
+  labels:
+    app: backend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: backend
+  template:
+    metadata:
+      labels:
+        app: backend
+    spec:
+      containers:
+        - name: backend
+          # Replace with your registry path, e.g. registry.example.com/collage-alarm-backend:1.0.0
+          image: collage-alarm-backend:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 4000
+          envFrom:
+            - configMapRef:
+                name: collage-alarm-config
+            - secretRef:
+                name: collage-alarm-secret
+          # Sounds PersistentVolumeClaim — see sounds-pvc.yaml
+          volumeMounts:
+            - name: sounds
+              mountPath: /app/sounds
+              readOnly: true
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "64Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+          readinessProbe:
+            httpGet:
+              path: /api/auth/verify
+              port: 4000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/auth/verify
+              port: 4000
+            initialDelaySeconds: 15
+            periodSeconds: 20
+      volumes:
+        - name: sounds
+          # Replace with a real PVC or hostPath pointing to your MP3 files.
+          # Example using hostPath (single-node / dev cluster only):
+          hostPath:
+            path: /var/collage-alarm/sounds
+            type: DirectoryOrCreate
+      # Audio device access — only needed when the backend executes aplay/ffplay on the node.
+      # Remove the block below if sounds are handled outside the cluster.
+      # hostPID: false
+      # securityContext:
+      #   supplementalGroups: [29]   # 'audio' GID on Debian/Ubuntu nodes

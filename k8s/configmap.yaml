@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: collage-alarm-config
+  namespace: collage-alarm
+data:
+  PORT: "4000"
+  # Frontend uses backend's in-cluster DNS name
+  REACT_APP_API_URL: "http://backend-service:4000/api"
+  VITE_API_URL: "http://backend-service:4000/api"
+  HOST: "0.0.0.0"
+  # Sound commands — override as needed (see Secret for credentials)
+  ALARM_BELL_COMMAND: 'aplay "/app/sounds/test.mp3"'
+  ALARM_HYMN_COMMAND: 'aplay "/app/sounds/test.mp3"'
+  ALARM_FIRE_COMMAND: 'aplay "/app/sounds/test.mp3"'
+  ALARM_CUSTOM_COMMAND: 'aplay "/app/sounds/test.mp3"'

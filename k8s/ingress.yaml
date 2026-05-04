@@ -1,0 +1,33 @@
+# Ingress routes external traffic to frontend and backend.
+# Requires an Ingress controller (e.g. nginx-ingress) to be installed in the cluster.
+#
+# Install nginx-ingress on minikube:  minikube addons enable ingress
+# Install on a real cluster:          helm install ingress-nginx ingress-nginx/ingress-nginx
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: collage-alarm-ingress
+  namespace: collage-alarm
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  ingressClassName: nginx
+  rules:
+    # Replace 'collage-alarm.example.com' with your actual domain or IP.
+    - host: collage-alarm.example.com
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: backend-service
+                port:
+                  number: 4000
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend-service
+                port:
+                  number: 3000

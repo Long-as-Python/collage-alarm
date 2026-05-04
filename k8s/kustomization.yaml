@@ -1,0 +1,23 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: collage-alarm
+
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - secret.yaml
+  - backend-deployment.yaml
+  - backend-service.yaml
+  - frontend-deployment.yaml
+  - frontend-service.yaml
+  - ingress.yaml
+
+# Uncomment and edit to push images to a registry:
+# images:
+#   - name: collage-alarm-backend
+#     newName: registry.example.com/collage-alarm-backend
+#     newTag: "1.0.0"
+#   - name: collage-alarm-frontend
+#     newName: registry.example.com/collage-alarm-frontend
+#     newTag: "1.0.0"
