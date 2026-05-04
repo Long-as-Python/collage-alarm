@@ -29,6 +29,20 @@ std::string currentTimeString()
   std::strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S", &localTime);
   return buffer;
 }
+
+json getStoredSchedule(const json& config, const std::string& scheduleType, const json& fallback)
+{
+  if (config.contains("schedules") && config["schedules"].is_object())
+  {
+    const auto& schedules = config["schedules"];
+    if (schedules.contains(scheduleType) && schedules[scheduleType].is_array())
+    {
+      return schedules[scheduleType];
+    }
+  }
+
+  return fallback;
+}
 }
 
 AppServer::AppServer(int port) : port(port)
@@ -73,21 +87,23 @@ void AppServer::start()
   });
 
   server.Get("/api/schedule/all", [this](const httplib::Request&, httplib::Response& res) {
+    auto config = alarmService.getConfig();
     auto response = nlohmann::json{
       {"success", true},
-      {"scheduleType", alarmService.getConfig().value("scheduleType", "full")},
-      {"full", scheduleService.getFullSchedule()},
-      {"short", scheduleService.getShortSchedule()}
+      {"scheduleType", config.value("scheduleType", "full")},
+      {"full", getStoredSchedule(config, "full", scheduleService.getFullSchedule())},
+      {"short", getStoredSchedule(config, "short", scheduleService.getShortSchedule())}
     };
     res.set_content(response.dump(), "application/json");
   });
 
   server.Get("/api/schedule/current", [this](const httplib::Request&, httplib::Response& res) {
-    auto scheduleType = alarmService.getConfig().value("scheduleType", "full");
+    auto config = alarmService.getConfig();
+    auto scheduleType = config.value("scheduleType", "full");
     auto response = nlohmann::json{
       {"success", true},
       {"scheduleType", scheduleType},
-      {"schedule", scheduleService.getScheduleByType(scheduleType)}
+      {"schedule", getStoredSchedule(config, scheduleType, scheduleService.getScheduleByType(scheduleType))}
     };
     res.set_content(response.dump(), "application/json");
   });

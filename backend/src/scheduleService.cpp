@@ -23,6 +23,7 @@ json ScheduleService::getFullSchedule()
   schedule.push_back(makeSlot(5, "15:00", "16:20"));
   schedule.push_back(makeSlot(6, "16:30", "17:50"));
   schedule.push_back(makeSlot(7, "18:00", "19:20"));
+  schedule.push_back(makeSlot(8, "19:30", "20:50"));
 
   return schedule;
 }
