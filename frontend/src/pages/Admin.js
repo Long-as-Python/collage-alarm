@@ -1,23 +1,18 @@
-import React, { useContext, useEffect, useRef, useState } from 'react';
+import React, { useContext, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AuthContext } from '../context/AuthContext';
 import { alarmService } from '../services/apiService';
 import '../styles/Admin.css';
 
-const DEFAULT_SOUND = 'data:audio/wav;base64,UklGRiYAAABXQVZFZm10IBAAAAABAAEAQB8AAAB9AAACABAAZGF0YQIAAAAAAA==';
-
 const Admin = () => {
   const navigate = useNavigate();
   const { user, logout } = useContext(AuthContext);
-  const fileInputRef = useRef(null);
 
   const [scheduleType, setScheduleType] = useState('full');
   const [config, setConfig] = useState({ isEnabled: true, lessons: [] });
   const [newLesson, setNewLesson] = useState({ startTime: '09:00', endTime: '10:30', soundType: 'bell' });
-  const [sounds, setSounds] = useState([
-    { id: 'bell', name: 'Дзвінок', url: DEFAULT_SOUND },
-    { id: 'hymn', name: 'Гімн України', url: DEFAULT_SOUND }
-  ]);
+  const [sounds, setSounds] = useState([{ id: 'bell', label: 'Дзвінок' }]);
+  const [fireAlarmActive, setFireAlarmActive] = useState(false);
 
   useEffect(() => {
     if (!user || user.role !== 'admin') {
@@ -25,12 +20,17 @@ const Admin = () => {
       return;
     }
 
-    Promise.all([alarmService.getConfig(), alarmService.getAllSchedules()])
-      .then(([configResponse, schedulesResponse]) => {
+    Promise.all([alarmService.getConfig(), alarmService.getAllSchedules(), alarmService.getSounds()])
+      .then(([configResponse, schedulesResponse, soundsResponse]) => {
+        const nextSounds = soundsResponse.data?.sounds || [];
         const nextConfig = configResponse.data || { isEnabled: true, lessons: [] };
         const nextScheduleType = nextConfig.scheduleType || 'full';
         const nextSchedules = nextConfig.schedules || schedulesResponse.data || {};
         const nextLessons = nextSchedules[nextScheduleType] || nextConfig.lessons || [];
+
+        if (nextSounds.length > 0) {
+          setSounds(nextSounds);
+        }
 
         setScheduleType(nextScheduleType);
         setConfig({
@@ -85,7 +85,8 @@ const Admin = () => {
     const lessons = [...(config.lessons || []), {
       ...newLesson,
       startTime: normalizeTimeValue(newLesson.startTime),
-      endTime: normalizeTimeValue(newLesson.endTime)
+      endTime: normalizeTimeValue(newLesson.endTime),
+      soundType: newLesson.soundType || sounds[0]?.id || 'bell'
     }];
     setConfig({
       ...config,
@@ -95,6 +96,7 @@ const Admin = () => {
         [scheduleType]: lessons
       }
     });
+    setNewLesson({ startTime: '09:00', endTime: '10:30', soundType: sounds[0]?.id || 'bell' });
   };
 
   const handleRemoveLesson = (index) => {
@@ -122,48 +124,6 @@ const Admin = () => {
     });
   };
 
-  const handleAddSound = () => {
-    fileInputRef.current?.click();
-  };
-
-  const handleSoundUpload = (event) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (loadEvent) => {
-      const newSound = {
-        id: `custom-${Date.now()}`,
-        name: file.name.replace(/\.[^/.]+$/, ''),
-        url: loadEvent.target.result
-      };
-
-      setSounds(prev => [...prev, newSound]);
-    };
-    reader.readAsDataURL(file);
-    event.target.value = '';
-  };
-
-  const handleDeleteSound = (soundId) => {
-    const remainingSounds = sounds.filter(sound => sound.id !== soundId);
-    const fallbackSound = remainingSounds[0] || null;
-    const rewriteLessons = (lessons) => (lessons || []).map(lesson => (
-      lesson.soundType === soundId ? { ...lesson, soundType: fallbackSound ? fallbackSound.id : '' } : lesson
-    ));
-
-    const updatedSchedules = Object.entries(config.schedules || {}).reduce((accumulator, [key, lessons]) => {
-      accumulator[key] = rewriteLessons(lessons);
-      return accumulator;
-    }, {});
-
-    setSounds(remainingSounds);
-    setConfig({
-      ...config,
-      lessons: rewriteLessons(config.lessons),
-      schedules: updatedSchedules
-    });
-  };
-
   const handleSaveConfig = async () => {
     try {
       const schedules = {
@@ -175,13 +135,28 @@ const Admin = () => {
         ...config,
         scheduleType,
         schedules,
-        lessons: config.lessons || [],
-        sounds
+        lessons: config.lessons || []
       });
       alert('Налаштування збережено');
     } catch (err) {
       console.error(err);
       alert('Помилка при збереженні');
+    }
+  };
+
+  const handleFireAlarm = async () => {
+    if (!window.confirm('Запустити пожежну тривогу зараз?')) {
+      return;
+    }
+
+    setFireAlarmActive(true);
+    try {
+      await alarmService.triggerFireAlarm();
+    } catch (err) {
+      console.error(err);
+      alert('Помилка при запуску пожежної тривоги');
+    } finally {
+      setFireAlarmActive(false);
     }
   };
 
@@ -194,6 +169,13 @@ const Admin = () => {
 
       <div className="admin-content">
         <section className="sound-control-section">
+          <div className="sound-card emergency-card">
+            <label>Пожежна тривога</label>
+            <button className="plain-btn emergency" onClick={handleFireAlarm} disabled={fireAlarmActive}>
+              {fireAlarmActive ? 'Запуск...' : 'Увімкнути зараз'}
+            </button>
+          </div>
+
           <div className="sound-card">
             <label>Тип розкладу</label>
             <select className="song-select" value={scheduleType} onChange={(e) => handleScheduleTypeChange(e.target.value)}>
@@ -203,14 +185,12 @@ const Admin = () => {
           </div>
 
           <div className="sound-card">
-            <label>Додати звук</label>
-            <input ref={fileInputRef} type="file" accept="audio/*" onChange={handleSoundUpload} style={{ display: 'none' }} />
-            <button className="plain-btn" onClick={handleAddSound}>Додати звук</button>
+            <label>Доступні звуки</label>
             <div className="sounds-list">
               {sounds.map(sound => (
                 <div key={sound.id} className="sound-item">
-                  <span>{sound.name}</span>
-                  <button className="plain-btn danger small" onClick={() => handleDeleteSound(sound.id)}>Видалити</button>
+                  <span>{sound.label}</span>
+                  <span>{sound.commandEnv}</span>
                 </div>
               ))}
             </div>
@@ -223,7 +203,7 @@ const Admin = () => {
               <input type="text" inputMode="numeric" placeholder="09:50" value={newLesson.endTime} onChange={(e) => setNewLesson({ ...newLesson, endTime: normalizeTimeValue(e.target.value) })} />
               <select value={newLesson.soundType || ''} onChange={(e) => setNewLesson({ ...newLesson, soundType: e.target.value })}>
                 {sounds.length === 0 && <option value="">Немає звуків</option>}
-                {sounds.map(sound => <option key={sound.id} value={sound.id}>{sound.name}</option>)}
+                {sounds.map(sound => <option key={sound.id} value={sound.id}>{sound.label}</option>)}
               </select>
               <button className="plain-btn" onClick={handleAddLesson}>Додати</button>
             </div>
@@ -235,7 +215,7 @@ const Admin = () => {
                   <input type="text" inputMode="numeric" value={lesson.endTime || ''} onChange={(e) => handleLessonChange(index, 'endTime', e.target.value)} />
                   <select value={lesson.soundType || ''} onChange={(e) => handleLessonChange(index, 'soundType', e.target.value)}>
                     {sounds.length === 0 && <option value="">Немає звуків</option>}
-                    {sounds.map(sound => <option key={sound.id} value={sound.id}>{sound.name}</option>)}
+                    {sounds.map(sound => <option key={sound.id} value={sound.id}>{sound.label}</option>)}
                   </select>
                   <button className="plain-btn danger" onClick={() => handleRemoveLesson(index)}>Видалити</button>
                 </div>
@@ -248,7 +228,6 @@ const Admin = () => {
           </div>
         </section>
       </div>
-
     </div>
   );
 };

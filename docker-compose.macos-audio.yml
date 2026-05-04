@@ -1,0 +1,7 @@
+services:
+  backend:
+    environment:
+      - ALARM_BELL_COMMAND=curl -fsS -X POST http://host.docker.internal:5056/sounds/bell
+      - ALARM_HYMN_COMMAND=curl -fsS -X POST http://host.docker.internal:5056/sounds/hymn
+      - ALARM_FIRE_COMMAND=curl -fsS -X POST http://host.docker.internal:5056/sounds/fire_alarm
+      - ALARM_CUSTOM_COMMAND=curl -fsS -X POST http://host.docker.internal:5056/sounds/custom
