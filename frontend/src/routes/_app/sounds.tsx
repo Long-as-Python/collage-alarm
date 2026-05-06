@@ -1,7 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Music, Plus, Search, Sparkles, Trash2, Pencil, Play } from "lucide-react";
 import { useCreateSound, useDeleteSound, useSounds, useUpdateSound } from "@/shared/api/hooks";
+import { airRaidService } from "@/shared/api/services";
 import { PageHeader, LoadingState, EmptyState } from "@/shared/ui/states";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -30,6 +31,7 @@ function SoundsPage() {
   const [editing, setEditing] = useState<SoundItem | null>(null);
   const [adding, setAdding] = useState(false);
   const [deleting, setDeleting] = useState<SoundItem | null>(null);
+  const [playingId, setPlayingId] = useState<string | null>(null);
 
   const allTags = useMemo(() => {
     const s = new Set<string>();
@@ -39,6 +41,7 @@ function SoundsPage() {
 
   const filtered = useMemo(() => {
     return (sounds.data ?? []).filter((s) => {
+      if (!s.isCustom) return false;
       if (q && !s.name.toLowerCase().includes(q.toLowerCase())) return false;
       if (activeTags.length && !activeTags.every((t) => s.tags.includes(t))) return false;
       return true;
@@ -98,16 +101,29 @@ function SoundsPage() {
                   {s.tags.length === 0 && <span className="text-xs text-muted-foreground">без тегів</span>}
                 </div>
                 <div className="mt-3 flex justify-end gap-1">
-                  <Button size="icon" variant="ghost" onClick={() => toast.info("Прев'ю звуку")} aria-label="Відтворити">
+                  <Button size="icon" variant="ghost" disabled={playingId === s.id}
+                    onClick={async () => {
+                      setPlayingId(s.id);
+                      try {
+                        await airRaidService.playSound(s.id);
+                        toast.success("Звук відтворено");
+                      } catch {
+                        toast.error("Не вдалось відтворити звук");
+                      } finally {
+                        setPlayingId(null);
+                      }
+                    }} aria-label="Відтворити">
                     <Play className="h-4 w-4" />
                   </Button>
-                  <Button size="icon" variant="ghost" onClick={() => setEditing(s)} aria-label="Редагувати">
-                    <Pencil className="h-4 w-4" />
-                  </Button>
                   {s.isCustom && (
-                    <Button size="icon" variant="ghost" className="text-destructive" onClick={() => setDeleting(s)} aria-label="Видалити">
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
+                    <>
+                      <Button size="icon" variant="ghost" onClick={() => setEditing(s)} aria-label="Редагувати">
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                      <Button size="icon" variant="ghost" className="text-destructive" onClick={() => setDeleting(s)} aria-label="Видалити">
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </>
                   )}
                 </div>
               </div>
@@ -118,12 +134,29 @@ function SoundsPage() {
 
       <SoundDialog
         open={adding} onOpenChange={setAdding}
-        onSubmit={async (v) => { await create.mutateAsync(v); toast.success("Звук додано"); setAdding(false); }}
+        onSubmit={async (v) => {
+          try {
+            await create.mutateAsync(v);
+            toast.success("Звук додано");
+            setAdding(false);
+          } catch (e: any) {
+            toast.error(e?.message ?? "Не вдалось додати звук");
+          }
+        }}
       />
       <SoundDialog
         open={!!editing} onOpenChange={(o) => { if (!o) setEditing(null); }}
         initial={editing ?? undefined}
-        onSubmit={async (v) => { if (!editing) return; await update.mutateAsync({ id: editing.id, patch: v }); toast.success("Збережено"); setEditing(null); }}
+        onSubmit={async (v) => {
+          if (!editing) return;
+          try {
+            await update.mutateAsync({ id: editing.id, patch: v });
+            toast.success("Збережено");
+            setEditing(null);
+          } catch (e: any) {
+            toast.error(e?.message ?? "Не вдалось зберегти зміни");
+          }
+        }}
       />
       <AlertDialog open={!!deleting} onOpenChange={(o) => !o && setDeleting(null)}>
         <AlertDialogContent>
@@ -133,7 +166,15 @@ function SoundsPage() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Скасувати</AlertDialogCancel>
-            <AlertDialogAction onClick={async () => { await remove.mutateAsync(deleting!.id); setDeleting(null); toast.success("Звук видалено"); }}
+            <AlertDialogAction onClick={async () => {
+              try {
+                await remove.mutateAsync(deleting!.id);
+                setDeleting(null);
+                toast.success("Звук видалено");
+              } catch (e: any) {
+                toast.error(e?.message ?? "Не вдалось видалити звук");
+              }
+            }}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90">Видалити</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -147,34 +188,35 @@ function SoundDialog({
 }: {
   open: boolean; onOpenChange: (o: boolean) => void;
   initial?: SoundItem;
-  onSubmit: (v: { name: string; description?: string; tags: string[]; fileName?: string }) => Promise<void>;
+  onSubmit: (v: { name: string; description?: string; tags: string[]; file?: File }) => Promise<void>;
 }) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [tagsStr, setTagsStr] = useState("");
-  const [fileName, setFileName] = useState("");
+  const [file, setFile] = useState<File | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   // sync on open
-  useMemo(() => {
+  useEffect(() => {
     if (open) {
       setName(initial?.name ?? "");
       setDescription(initial?.description ?? "");
       setTagsStr(initial?.tags.join(", ") ?? "");
-      setFileName("");
+      setFile(null);
     }
   }, [open, initial]);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!name.trim()) { toast.error("Введіть назву"); return; }
+    if (!initial && !file) { toast.error("Оберіть файл звуку"); return; }
     setSubmitting(true);
     try {
       await onSubmit({
         name: name.trim(),
         description: description.trim() || undefined,
         tags: tagsStr.split(",").map((t) => t.trim()).filter(Boolean),
-        fileName: fileName || undefined,
+        file: file ?? undefined,
       });
     } finally { setSubmitting(false); }
   }
@@ -199,8 +241,8 @@ function SoundDialog({
           {!initial && (
             <div>
               <Label>Файл звуку</Label>
-              <Input type="file" accept="audio/*" onChange={(e) => setFileName(e.target.files?.[0]?.name ?? "")} />
-              {fileName && <p className="mt-1 text-xs text-muted-foreground">{fileName}</p>}
+              <Input type="file" accept="audio/*" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+              {file && <p className="mt-1 text-xs text-muted-foreground">{file.name}</p>}
             </div>
           )}
           <DialogFooter>

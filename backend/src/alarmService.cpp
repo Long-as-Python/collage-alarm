@@ -1,11 +1,47 @@
 #include "alarmService.h"
+#include <algorithm>
 #include <chrono>
 #include <cstdlib>
 #include <ctime>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <sstream>
 
 namespace
 {
+std::filesystem::path configFilePath()
+{
+  return "/app/data/config.json";
+}
+
+void saveConfigToFile(const json& config)
+{
+  try
+  {
+    const auto path = configFilePath();
+    std::filesystem::create_directories(path.parent_path());
+    std::ofstream out(path);
+    if (out)
+    {
+      out << config.dump(2);
+    }
+  }
+  catch (...) {}
+}
+
+json loadConfigFromFile()
+{
+  std::ifstream in(configFilePath());
+  if (!in)
+  {
+    return json{};
+  }
+  json config = json::parse(in, nullptr, false);
+  return config.is_discarded() ? json{} : config;
+}
+
+
 struct SoundDefinition
 {
   std::string id;
@@ -40,6 +76,29 @@ const SoundDefinition* findSound(const std::string& soundType)
   }
 
   return nullptr;
+}
+
+bool soundExists(const std::string& soundType, const json& customSounds)
+{
+  if (findSound(soundType) != nullptr)
+  {
+    return true;
+  }
+
+  if (!customSounds.is_array())
+  {
+    return false;
+  }
+
+  for (const auto& sound : customSounds)
+  {
+    if (sound.is_object() && sound.value("id", "") == soundType)
+    {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 std::string getEnvValue(const char* name)
@@ -97,11 +156,197 @@ std::string currentTimeHHMM()
   return formatTime(localTime, "%H:%M");
 }
 
+std::string currentIsoTimestamp()
+{
+  const std::tm localTime = getLocalTime();
+  return formatTime(localTime, "%Y-%m-%dT%H:%M:%S");
+}
+
 bool lessonTriggersNow(const json& lesson, const std::string& nowTime)
 {
   const bool startsNow = lesson.contains("startTime") && lesson["startTime"].is_string() && lesson["startTime"].get<std::string>() == nowTime;
   const bool endsNow = lesson.contains("endTime") && lesson["endTime"].is_string() && lesson["endTime"].get<std::string>() == nowTime;
   return startsNow || endsNow;
+}
+
+int currentIsoWeekday()
+{
+  std::tm localTime = getLocalTime();
+  const int weekday = localTime.tm_wday;
+  return weekday == 0 ? 7 : weekday;
+}
+
+json defaultDaysOfWeek()
+{
+  return json::array({1, 2, 3, 4, 5});
+}
+
+bool isValidDayOfWeek(int day)
+{
+  return day >= 1 && day <= 7;
+}
+
+bool matchesCurrentDay(const json& item, int currentDay)
+{
+  if (!item.contains("daysOfWeek") || !item["daysOfWeek"].is_array())
+  {
+    return true;
+  }
+
+  for (const auto& day : item["daysOfWeek"])
+  {
+    if (day.is_number_integer() && day.get<int>() == currentDay)
+    {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+std::string stringifyId(const json& value)
+{
+  if (value.is_string())
+  {
+    return value.get<std::string>();
+  }
+  if (value.is_number_integer())
+  {
+    return std::to_string(value.get<int>());
+  }
+  if (value.is_number_unsigned())
+  {
+    return std::to_string(value.get<unsigned int>());
+  }
+  if (value.is_number_float())
+  {
+    std::ostringstream stream;
+    stream << value.get<double>();
+    return stream.str();
+  }
+  return "";
+}
+
+std::string makeCustomSoundId()
+{
+  const auto now = std::chrono::system_clock::now().time_since_epoch();
+  return "custom-" + std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(now).count());
+}
+
+std::string sanitizeExtension(const std::string& fileName)
+{
+  const std::size_t dot = fileName.find_last_of('.');
+  if (dot == std::string::npos || dot == fileName.size() - 1)
+  {
+    return ".bin";
+  }
+
+  std::string extension = fileName.substr(dot);
+  if (extension.size() > 10)
+  {
+    return ".bin";
+  }
+
+  for (char& ch : extension)
+  {
+    ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+  }
+
+  for (char ch : extension)
+  {
+    if (!(std::isalnum(static_cast<unsigned char>(ch)) || ch == '.'))
+    {
+      return ".bin";
+    }
+  }
+
+  return extension;
+}
+
+std::string shellQuote(const std::string& value)
+{
+  std::string quoted = "'";
+  for (char ch : value)
+  {
+    if (ch == '\'')
+    {
+      quoted += "'\"'\"'";
+    }
+    else
+    {
+      quoted += ch;
+    }
+  }
+  quoted += "'";
+  return quoted;
+}
+
+std::filesystem::path customSoundsDirectory()
+{
+  return "/app/sounds/custom";
+}
+
+void normalizeCustomSounds(json& sounds)
+{
+  if (!sounds.is_array())
+  {
+    sounds = json::array();
+    return;
+  }
+
+  for (auto& sound : sounds)
+  {
+    if (!sound.is_object())
+    {
+      sound = json::object();
+    }
+
+    if (!sound.contains("id") || !sound["id"].is_string() || sound["id"].get<std::string>().empty())
+    {
+      sound["id"] = makeCustomSoundId();
+    }
+
+    if (!sound.contains("label") || !sound["label"].is_string())
+    {
+      sound["label"] = "Кастомний звук";
+    }
+
+    if (!sound.contains("description") || !sound["description"].is_string())
+    {
+      sound["description"] = "";
+    }
+
+    if (!sound.contains("tags") || !sound["tags"].is_array())
+    {
+      sound["tags"] = json::array();
+    }
+
+    json normalizedTags = json::array();
+    for (const auto& tag : sound["tags"])
+    {
+      if (tag.is_string() && !tag.get<std::string>().empty())
+      {
+        normalizedTags.push_back(tag.get<std::string>());
+      }
+    }
+    sound["tags"] = normalizedTags;
+
+    if (!sound.contains("fileName") || !sound["fileName"].is_string())
+    {
+      sound["fileName"] = sound["id"].get<std::string>() + ".bin";
+    }
+
+    if (!sound.contains("filePath") || !sound["filePath"].is_string() || sound["filePath"].get<std::string>().empty())
+    {
+      const std::string id = sound["id"].get<std::string>();
+      sound["filePath"] = (customSoundsDirectory() / (id + sanitizeExtension(sound["fileName"].get<std::string>()))).string();
+    }
+
+    if (!sound.contains("createdAt") || !sound["createdAt"].is_string())
+    {
+      sound["createdAt"] = currentIsoTimestamp();
+    }
+  }
 }
 
 json makeSlot(int id, const std::string& startTime, const std::string& endTime, const std::string& soundType)
@@ -137,7 +382,7 @@ json makeDefaultShortSchedule()
   return schedule;
 }
 
-void normalizeLessonSounds(json& lessons)
+void normalizeLessonSounds(json& lessons, const json& customSounds)
 {
   if (!lessons.is_array())
   {
@@ -152,11 +397,129 @@ void normalizeLessonSounds(json& lessons)
       lesson = json::object();
     }
 
-    const std::string soundType = lesson.value("soundType", defaultSound().id);
-    if (findSound(soundType) == nullptr)
+    if (!lesson.contains("id"))
     {
-      lesson["soundType"] = defaultSound().id;
+      lesson["id"] = 0;
     }
+
+    if (!lesson.contains("label") || !lesson["label"].is_string())
+    {
+      lesson["label"] = "";
+    }
+
+    if (!lesson.contains("startTime") || !lesson["startTime"].is_string())
+    {
+      lesson["startTime"] = "08:30";
+    }
+
+    if (!lesson.contains("endTime") || !lesson["endTime"].is_string())
+    {
+      lesson["endTime"] = "09:15";
+    }
+
+    if (!lesson.contains("enabled") || !lesson["enabled"].is_boolean())
+    {
+      lesson["enabled"] = true;
+    }
+
+    if (!lesson.contains("daysOfWeek") || !lesson["daysOfWeek"].is_array())
+    {
+      lesson["daysOfWeek"] = defaultDaysOfWeek();
+    }
+
+    json normalizedDays = json::array();
+    for (const auto& day : lesson["daysOfWeek"])
+    {
+      if (day.is_number_integer())
+      {
+        const int dayValue = day.get<int>();
+        if (isValidDayOfWeek(dayValue))
+        {
+          normalizedDays.push_back(dayValue);
+        }
+      }
+    }
+    lesson["daysOfWeek"] = normalizedDays.empty() ? defaultDaysOfWeek() : normalizedDays;
+
+    const std::string legacySoundType = lesson.value("soundType", defaultSound().id);
+    std::string startSoundType = lesson.value("startSoundType", legacySoundType);
+    std::string endSoundType = lesson.value("endSoundType", legacySoundType);
+
+    if (!soundExists(startSoundType, customSounds))
+    {
+      startSoundType = defaultSound().id;
+    }
+    if (!soundExists(endSoundType, customSounds))
+    {
+      endSoundType = defaultSound().id;
+    }
+
+    lesson["startSoundType"] = startSoundType;
+    lesson["endSoundType"] = endSoundType;
+    lesson["soundType"] = startSoundType;
+  }
+}
+
+void normalizeSingleEvents(json& events, const json& customSounds)
+{
+  if (!events.is_array())
+  {
+    events = json::array();
+    return;
+  }
+
+  for (auto& event : events)
+  {
+    if (!event.is_object())
+    {
+      event = json::object();
+    }
+
+    if (!event.contains("id"))
+    {
+      event["id"] = "";
+    }
+
+    if (!event.contains("label") || !event["label"].is_string())
+    {
+      event["label"] = "";
+    }
+
+    if (!event.contains("triggerTime") || !event["triggerTime"].is_string())
+    {
+      event["triggerTime"] = "08:15";
+    }
+
+    if (!event.contains("enabled") || !event["enabled"].is_boolean())
+    {
+      event["enabled"] = true;
+    }
+
+    if (!event.contains("daysOfWeek") || !event["daysOfWeek"].is_array())
+    {
+      event["daysOfWeek"] = defaultDaysOfWeek();
+    }
+
+    json normalizedDays = json::array();
+    for (const auto& day : event["daysOfWeek"])
+    {
+      if (day.is_number_integer())
+      {
+        const int dayValue = day.get<int>();
+        if (isValidDayOfWeek(dayValue))
+        {
+          normalizedDays.push_back(dayValue);
+        }
+      }
+    }
+    event["daysOfWeek"] = normalizedDays.empty() ? defaultDaysOfWeek() : normalizedDays;
+
+    std::string soundType = event.value("soundType", defaultSound().id);
+    if (!soundExists(soundType, customSounds))
+    {
+      soundType = defaultSound().id;
+    }
+    event["soundType"] = soundType;
   }
 }
 
@@ -208,15 +571,26 @@ std::string commandForSound(const std::string& soundType)
 AlarmService::AlarmService()
   : schedulerRunning(true)
 {
-  alarmConfig = json::object();
-  alarmConfig["isEnabled"] = true;
-  alarmConfig["scheduleType"] = "full";
-  const char* mainSoftApiUrl = std::getenv("MAIN_SOFT_API_URL");
-  alarmConfig["mainSoftApiUrl"] = mainSoftApiUrl != nullptr ? mainSoftApiUrl : "";
-  alarmConfig["schedules"] = json::object();
-  alarmConfig["schedules"]["full"] = makeDefaultFullSchedule();
-  alarmConfig["schedules"]["short"] = makeDefaultShortSchedule();
-  alarmConfig["lessons"] = alarmConfig["schedules"]["full"];
+  json saved = loadConfigFromFile();
+  if (saved.is_object() && !saved.empty())
+  {
+    std::cout << "Завантажено конфіг із " << configFilePath() << std::endl;
+    alarmConfig = saved;
+  }
+  else
+  {
+    alarmConfig = json::object();
+    alarmConfig["isEnabled"] = true;
+    alarmConfig["scheduleType"] = "full";
+    const char* mainSoftApiUrl = std::getenv("MAIN_SOFT_API_URL");
+    alarmConfig["mainSoftApiUrl"] = mainSoftApiUrl != nullptr ? mainSoftApiUrl : "";
+    alarmConfig["schedules"] = json::object();
+    alarmConfig["schedules"]["full"] = makeDefaultFullSchedule();
+    alarmConfig["schedules"]["short"] = makeDefaultShortSchedule();
+    alarmConfig["lessons"] = alarmConfig["schedules"]["full"];
+    alarmConfig["events"] = json::array();
+    alarmConfig["customSounds"] = json::array();
+  }
   normalizeConfig();
   restartScheduler();
   schedulerThread = std::thread(&AlarmService::schedulerLoop, this);
@@ -240,13 +614,36 @@ json AlarmService::getConfig()
 json AlarmService::getAvailableSounds()
 {
   json sounds = json::array();
+  std::lock_guard<std::mutex> lock(alarmMutex);
   for (const auto& sound : soundCatalog())
   {
     sounds.push_back({
       {"id", sound.id},
       {"label", sound.label},
+      {"description", ""},
+      {"tags", json::array()},
+      {"fileName", ""},
+      {"createdAt", ""},
+      {"isCustom", false},
       {"commandEnv", sound.envCommandName}
     });
+  }
+
+  if (alarmConfig.contains("customSounds") && alarmConfig["customSounds"].is_array())
+  {
+    for (const auto& sound : alarmConfig["customSounds"])
+    {
+      sounds.push_back({
+        {"id", sound.value("id", "")},
+        {"label", sound.value("label", "Кастомний звук")},
+        {"description", sound.value("description", "")},
+        {"tags", sound.value("tags", json::array())},
+        {"fileName", sound.value("fileName", "")},
+        {"createdAt", sound.value("createdAt", "")},
+        {"isCustom", true},
+        {"commandEnv", ""}
+      });
+    }
   }
 
   return sounds;
@@ -258,6 +655,7 @@ void AlarmService::setConfig(const json& config)
     std::lock_guard<std::mutex> lock(alarmMutex);
     alarmConfig = config;
     normalizeConfig();
+    saveConfigToFile(alarmConfig);
   }
   restartScheduler();
 }
@@ -275,6 +673,109 @@ void AlarmService::setScheduleType(const std::string& scheduleType)
     }
   }
   normalizeConfig();
+  saveConfigToFile(alarmConfig);
+}
+
+json AlarmService::addCustomSound(const std::string& name, const std::string& description, const std::vector<std::string>& tags, const std::string& fileName, const std::string& fileContent)
+{
+  if (name.empty())
+  {
+    throw std::runtime_error("Назва звуку обов'язкова");
+  }
+  if (fileName.empty() || fileContent.empty())
+  {
+    throw std::runtime_error("Файл звуку обов'язковий");
+  }
+
+  const std::string id = makeCustomSoundId();
+  const std::filesystem::path directory = customSoundsDirectory();
+  std::filesystem::create_directories(directory);
+  const std::filesystem::path filePath = directory / (id + sanitizeExtension(fileName));
+
+  {
+    std::ofstream output(filePath, std::ios::binary);
+    if (!output)
+    {
+      throw std::runtime_error("Не вдалося зберегти файл звуку");
+    }
+    output.write(fileContent.data(), static_cast<std::streamsize>(fileContent.size()));
+    if (!output.good())
+    {
+      throw std::runtime_error("Не вдалося записати файл звуку");
+    }
+  }
+
+  json sound = {
+    {"id", id},
+    {"label", name},
+    {"description", description},
+    {"tags", tags},
+    {"fileName", fileName},
+    {"filePath", filePath.string()},
+    {"createdAt", currentIsoTimestamp()}
+  };
+
+  {
+    std::lock_guard<std::mutex> lock(alarmMutex);
+    if (!alarmConfig.contains("customSounds") || !alarmConfig["customSounds"].is_array())
+    {
+      alarmConfig["customSounds"] = json::array();
+    }
+    alarmConfig["customSounds"].push_back(sound);
+    normalizeConfig();
+    saveConfigToFile(alarmConfig);
+  }
+
+  return sound;
+}
+
+json AlarmService::updateCustomSound(const std::string& id, const std::string& name, const std::string& description, const std::vector<std::string>& tags)
+{
+  std::lock_guard<std::mutex> lock(alarmMutex);
+  json* sound = findCustomSoundUnlocked(id);
+  if (sound == nullptr)
+  {
+    throw std::runtime_error("Кастомний звук не знайдено");
+  }
+
+  if (!name.empty())
+  {
+    (*sound)["label"] = name;
+  }
+  (*sound)["description"] = description;
+  (*sound)["tags"] = tags;
+  normalizeConfig();
+  saveConfigToFile(alarmConfig);
+  return *findCustomSoundUnlocked(id);
+}
+
+void AlarmService::deleteCustomSound(const std::string& id)
+{
+  std::lock_guard<std::mutex> lock(alarmMutex);
+  if (!alarmConfig.contains("customSounds") || !alarmConfig["customSounds"].is_array())
+  {
+    throw std::runtime_error("Кастомний звук не знайдено");
+  }
+
+  auto& customSounds = alarmConfig["customSounds"];
+  for (auto it = customSounds.begin(); it != customSounds.end(); ++it)
+  {
+    if (it->is_object() && it->value("id", "") == id)
+    {
+      const std::string filePath = it->value("filePath", "");
+      customSounds.erase(it);
+      normalizeConfig();
+      saveConfigToFile(alarmConfig);
+      if (!filePath.empty())
+      {
+        std::error_code error;
+        std::filesystem::remove(filePath, error);
+      }
+      return;
+    }
+  }
+
+  throw std::runtime_error("Кастомний звук не знайдено");
 }
 
 void AlarmService::playAlarm()
@@ -293,6 +794,27 @@ void AlarmService::playFireAlarm()
 {
   std::cout << "[SOUND] Пожежна тривога" << std::endl;
   playSound("fire_alarm");
+}
+
+void AlarmService::triggerManual(const std::string& soundType)
+{
+  if (soundType == "hymn")
+  {
+    playHymn();
+  }
+  else if (soundType == "fire_alarm")
+  {
+    playFireAlarm();
+  }
+  else if (soundType == "bell")
+  {
+    playAlarm();
+  }
+  else
+  {
+    std::cout << "[SOUND] Manual: " << soundType << std::endl;
+    playSound(soundType);
+  }
 }
 
 void AlarmService::restartScheduler()
@@ -323,10 +845,16 @@ void AlarmService::normalizeConfig()
   {
     alarmConfig["schedules"] = json::object();
   }
+  if (!alarmConfig.contains("customSounds") || !alarmConfig["customSounds"].is_array())
+  {
+    alarmConfig["customSounds"] = json::array();
+  }
 
   alarmConfig.erase("sounds");
   const auto scheduleType = alarmConfig["scheduleType"].get<std::string>();
   auto& schedules = alarmConfig["schedules"];
+  auto& customSounds = alarmConfig["customSounds"];
+  normalizeCustomSounds(customSounds);
 
   if (!schedules.contains("full") || !schedules["full"].is_array())
   {
@@ -340,12 +868,12 @@ void AlarmService::normalizeConfig()
 
   for (auto& schedule : schedules.items())
   {
-    normalizeLessonSounds(schedule.value());
+    normalizeLessonSounds(schedule.value(), customSounds);
   }
 
   if (alarmConfig.contains("lessons") && alarmConfig["lessons"].is_array())
   {
-    normalizeLessonSounds(alarmConfig["lessons"]);
+    normalizeLessonSounds(alarmConfig["lessons"], customSounds);
     schedules[scheduleType] = alarmConfig["lessons"];
   }
   else if (schedules.contains(scheduleType) && schedules[scheduleType].is_array())
@@ -357,33 +885,91 @@ void AlarmService::normalizeConfig()
     alarmConfig["scheduleType"] = "full";
     alarmConfig["lessons"] = schedules["full"];
   }
+
+  if (!alarmConfig.contains("events") || !alarmConfig["events"].is_array())
+  {
+    alarmConfig["events"] = json::array();
+  }
+  normalizeSingleEvents(alarmConfig["events"], customSounds);
 }
 
-void AlarmService::triggerLesson(const json& lesson)
+bool AlarmService::soundExistsUnlocked(const std::string& soundType) const
 {
-  const auto soundType = lesson.value("soundType", defaultSound().id);
-  const SoundDefinition* sound = findSound(soundType);
-  const std::string resolvedSoundType = sound != nullptr ? sound->id : defaultSound().id;
+  if (findSound(soundType) != nullptr)
+  {
+    return true;
+  }
 
-  if (resolvedSoundType == "hymn")
+  const json* customSound = findCustomSoundUnlocked(soundType);
+  return customSound != nullptr;
+}
+
+json* AlarmService::findCustomSoundUnlocked(const std::string& soundId)
+{
+  if (!alarmConfig.contains("customSounds") || !alarmConfig["customSounds"].is_array())
   {
-    playHymn();
+    return nullptr;
   }
-  else if (resolvedSoundType == "fire_alarm")
+
+  for (auto& sound : alarmConfig["customSounds"])
   {
-    playFireAlarm();
+    if (sound.is_object() && sound.value("id", "") == soundId)
+    {
+      return &sound;
+    }
   }
-  else if (resolvedSoundType == "bell")
+
+  return nullptr;
+}
+
+const json* AlarmService::findCustomSoundUnlocked(const std::string& soundId) const
+{
+  if (!alarmConfig.contains("customSounds") || !alarmConfig["customSounds"].is_array())
   {
-    playAlarm();
+    return nullptr;
   }
-  else
+
+  for (const auto& sound : alarmConfig["customSounds"])
   {
-    std::cout << "[SOUND] " << (sound != nullptr ? sound->label : defaultSound().label) << std::endl;
-    playSound(resolvedSoundType);
+    if (sound.is_object() && sound.value("id", "") == soundId)
+    {
+      return &sound;
+    }
   }
+
+  return nullptr;
+}
+
+void AlarmService::triggerLesson(const json& lesson, bool isEndTrigger)
+{
+  const auto soundType = lesson.value(isEndTrigger ? "endSoundType" : "startSoundType", lesson.value("soundType", defaultSound().id));
+  const SoundDefinition* sound = findSound(soundType);
+
+  if (sound == nullptr)
+  {
+    std::cout << "[SOUND] Custom: " << soundType << std::endl;
+    playSound(soundType);
+  }
+  else if (sound->id == "hymn") { playHymn(); }
+  else if (sound->id == "fire_alarm") { playFireAlarm(); }
+  else { playAlarm(); }
 
   sendTriggerToMainSoft(lesson);
+}
+
+void AlarmService::triggerSingleEvent(const json& event)
+{
+  const auto soundType = event.value("soundType", defaultSound().id);
+  const SoundDefinition* sound = findSound(soundType);
+
+  if (sound == nullptr)
+  {
+    std::cout << "[SOUND] Custom: " << soundType << std::endl;
+    playSound(soundType);
+  }
+  else if (sound->id == "hymn") { playHymn(); }
+  else if (sound->id == "fire_alarm") { playFireAlarm(); }
+  else { playAlarm(); }
 }
 
 void AlarmService::sendTriggerToMainSoft(const json& lesson)
@@ -415,15 +1001,64 @@ void AlarmService::schedulerLoop()
       {
         const auto nowTime = currentTimeHHMM();
         const auto nowKey = currentDateTimeKey();
+        const int currentDay = currentIsoWeekday();
+
+        if (lastTriggerMinuteKey != nowKey)
+        {
+          lastTriggerMinuteKey = nowKey;
+          triggeredKeysForMinute.clear();
+        }
 
         for (const auto& lesson : configSnapshot["lessons"])
         {
-          const auto lessonKey = nowKey + "|" + lesson.value("startTime", "") + "|" + lesson.value("endTime", "");
-
-          if (lessonTriggersNow(lesson, nowTime) && lastTriggeredKey != lessonKey)
+          if (!lesson.value("enabled", true) || !matchesCurrentDay(lesson, currentDay))
           {
-            lastTriggeredKey = lessonKey;
-            triggerLesson(lesson);
+            continue;
+          }
+
+          const std::string lessonId = lesson.contains("id") ? stringifyId(lesson["id"]) : "";
+          if (lesson.contains("startTime") && lesson["startTime"].is_string() && lesson["startTime"].get<std::string>() == nowTime)
+          {
+            const auto lessonKey = nowKey + "|lesson|" + lessonId + "|start|" + lesson.value("startTime", "");
+            if (triggeredKeysForMinute.find(lessonKey) == triggeredKeysForMinute.end())
+            {
+              triggeredKeysForMinute.insert(lessonKey);
+              triggerLesson(lesson, false);
+            }
+          }
+
+          if (lesson.contains("endTime") && lesson["endTime"].is_string() && lesson["endTime"].get<std::string>() == nowTime)
+          {
+            const auto lessonKey = nowKey + "|lesson|" + lessonId + "|end|" + lesson.value("endTime", "");
+            if (triggeredKeysForMinute.find(lessonKey) == triggeredKeysForMinute.end())
+            {
+              triggeredKeysForMinute.insert(lessonKey);
+              triggerLesson(lesson, true);
+            }
+          }
+        }
+
+        if (configSnapshot.contains("events") && configSnapshot["events"].is_array())
+        {
+          for (const auto& event : configSnapshot["events"])
+          {
+            if (!event.value("enabled", true) || !matchesCurrentDay(event, currentDay))
+            {
+              continue;
+            }
+
+            if (!event.contains("triggerTime") || !event["triggerTime"].is_string() || event["triggerTime"].get<std::string>() != nowTime)
+            {
+              continue;
+            }
+
+            const std::string eventId = event.contains("id") ? stringifyId(event["id"]) : "";
+            const auto eventKey = nowKey + "|single|" + eventId + "|" + event.value("triggerTime", "");
+            if (triggeredKeysForMinute.find(eventKey) == triggeredKeysForMinute.end())
+            {
+              triggeredKeysForMinute.insert(eventKey);
+              triggerSingleEvent(event);
+            }
           }
         }
       }
@@ -439,12 +1074,31 @@ void AlarmService::schedulerLoop()
 
 void AlarmService::playSound(const std::string& soundType)
 {
-  const std::string command = commandForSound(soundType);
+  std::string command;
+  {
+    std::lock_guard<std::mutex> lock(alarmMutex);
+    const json* customSound = findCustomSoundUnlocked(soundType);
+    if (customSound != nullptr)
+    {
+      const std::string filePath = customSound->value("filePath", "");
+      if (!filePath.empty())
+      {
+        const std::string quotedPath = shellQuote(filePath);
+        command = "ffplay -nodisp -autoexit -loglevel error " + quotedPath + " >/dev/null 2>&1 || aplay " + quotedPath + " >/dev/null 2>&1";
+      }
+    }
+  }
+
+  if (command.empty())
+  {
+    command = commandForSound(soundType);
+  }
+
   const int result = std::system(command.c_str());
   if (result != 0)
   {
     const SoundDefinition* sound = findSound(soundType);
-    const std::string envName = sound != nullptr ? sound->envCommandName : defaultSound().envCommandName;
+    const std::string envName = sound != nullptr ? sound->envCommandName : "custom sound file";
     std::cerr << "Не вдалося відтворити звук типу '" << soundType
               << "'. Перевірте аудіо середовище або задайте "
               << envName

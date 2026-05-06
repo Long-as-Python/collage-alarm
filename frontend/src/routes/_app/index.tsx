@@ -27,7 +27,13 @@ function Dashboard() {
 
   const today = dayjs();
   const todayDow = ((today.day() === 0 ? 7 : today.day())) as number;
-  const todays = (events.data ?? []).filter((e) => e.daysOfWeek.includes(todayDow as any) && e.enabled)
+  const nowTime = today.format("HH:mm");
+  const allTodays = (events.data ?? []).filter((e) => e.daysOfWeek.includes(todayDow as any) && e.enabled);
+  const todays = allTodays
+    .filter((e) => {
+      const cutoff = e.type === "lesson" ? e.endTime : e.triggerTime;
+      return cutoff >= nowTime;
+    })
     .sort((a, b) => {
       const at = a.type === "lesson" ? a.startTime : a.triggerTime;
       const bt = b.type === "lesson" ? b.startTime : b.triggerTime;
@@ -43,7 +49,12 @@ function Dashboard() {
   }
 
   async function testSound() {
-    toast.info("Тестовий сигнал відтворено");
+    try {
+      await airRaidService.playSound("bell");
+      toast.success("Тестовий сигнал відтворено");
+    } catch {
+      toast.error("Не вдалось відтворити звук");
+    }
   }
 
   async function toggleScheduler() {
@@ -74,9 +85,9 @@ function Dashboard() {
           tone={airRaid.data?.enabled ? "success" : "default"}
         />
         <StatTile
-          label="Подій сьогодні"
+          label="Залишилось сьогодні"
           value={todays.length}
-          hint={`Всього: ${events.data?.length ?? 0}`}
+          hint={`Всього: ${allTodays.length}`}
         />
       </div>
 

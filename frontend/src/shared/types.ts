@@ -48,14 +48,15 @@ export type ScheduleEvent = LessonEvent | SingleEvent;
 
 export interface AirRaidSettings {
   enabled: boolean;
-  alarmSoundId: string | null;
-  volume: number; // 0..100
-  testMode: boolean;
-  autoPauseSchedule: boolean;
-  autoResumeSchedule: boolean;
+  apiKey: string;
+  regionId: string;
+  airRaidSoundId: string | null;
+  fireSoundId: string | null;
+  playDuringAlert: boolean;
+  active?: boolean;
 }
 
-export type ScheduleType = "weekly" | "daily" | "custom";
+export type ScheduleType = "weekly" | "daily" | "custom" | "full" | "short";
 
 export interface SystemConfig {
   scheduleType: ScheduleType;

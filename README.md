@@ -2,6 +2,17 @@
 
 Collage Alarm is a small college bell scheduling system with a C++ HTTP backend and a React admin UI. Administrators can enable or disable signals, choose a schedule type, edit lesson times, and assign a sound type to each lesson.
 
+## Current production deployment
+
+The **active live deployment** is **not** the Kubernetes manifests in `k8s/`.
+
+Current live runtime:
+
+- **host:** `192.168.0.31`
+- **runtime:** direct Docker containers on the VM
+- **public handoff port:** `33080`
+- **ops doc:** [`docs-vm-deployment.md`](./docs-vm-deployment.md)
+
 ## Project Structure
 
 ```text
@@ -27,8 +38,8 @@ Collage Alarm is a small college bell scheduling system with a C++ HTTP backend 
 - Editable custom lesson list through the admin panel.
 - Immediate fire alarm trigger from the admin panel.
 - Predefined bell, hymn, fire alarm, and custom sound presets.
-- Extensible backend sound catalog consumed by the admin UI.
-- Backend scheduler that checks lesson start and end times every minute.
+- Custom sound upload, update, and delete through the admin UI.
+- Backend scheduler that checks lessons and custom events and allows multiple triggers in the same minute.
 - Cross-platform fallback sound commands for macOS, Windows, and Linux.
 - Overrideable playback commands for deployment-specific audio setups.
 
@@ -60,7 +71,8 @@ Create a local `.env` file at the repository root when running with Docker Compo
 PORT=4000
 ADMIN_PASSWORD=admin123
 JWT_SECRET=secret-key-collage-alarm
-REACT_APP_API_URL=http://localhost:4000/api
+VITE_API_BASE_URL=http://localhost:4000/api
+VITE_USE_MOCK=true
 
 # Optional sound command overrides
 ALARM_BELL_COMMAND=
@@ -74,7 +86,8 @@ ALARM_CUSTOM_COMMAND=
 | `PORT` | `4000` | Backend | HTTP port for the API server. |
 | `ADMIN_PASSWORD` | `admin123` | Backend | Password accepted by the admin login endpoint. |
 | `JWT_SECRET` | `secret-key-collage-alarm` | Backend | Currently loaded by auth service for future token handling. |
-| `REACT_APP_API_URL` | `http://localhost:4000/api` | Frontend | API base URL used by the React app. |
+| `VITE_API_BASE_URL` | `http://localhost:4000/api` | Frontend | API base URL used by the Vite app. |
+| `VITE_USE_MOCK` | `true` | Frontend | Enables the mock frontend API when not set to `false`. |
 | `ALARM_BELL_COMMAND` | Platform fallback | Backend | Shell command run for bell playback. |
 | `ALARM_HYMN_COMMAND` | Platform fallback | Backend | Shell command run for hymn playback. |
 | `ALARM_FIRE_COMMAND` | Platform fallback | Backend | Shell command run for immediate fire alarm playback. |
@@ -97,7 +110,7 @@ The backend listens on `http://localhost:4000` unless `PORT` is set.
 ```bash
 cd frontend
 npm install
-npm start
+npm run dev
 ```
 
 The frontend runs on `http://localhost:3000`.
@@ -155,11 +168,18 @@ admin123
 
 Set `ADMIN_PASSWORD` in production or shared environments.
 
+In the current backend, the **password** is what matters; the username field is effectively cosmetic.
+
 ## Sound Playback
 
-The backend plays sounds when a configured lesson starts or ends. It compares lesson `startTime` and `endTime` values to the local system time in `HH:MM` format and triggers at most once per minute.
+The backend plays sounds when a configured lesson starts or ends, and when a custom single event reaches its `triggerTime`. It compares configured times to the local system time in `HH:MM` format.
 
-Sounds are predefined by the backend catalog and exposed to the frontend through `/api/alarms/sounds`. The admin panel renders its sound selector from that API instead of hardcoding sound options in React.
+Sounds are exposed to the frontend through `/api/alarms/sounds`. That API now returns:
+
+- built-in sound presets;
+- uploaded custom sounds stored in backend runtime config.
+
+The Sounds UI can upload real audio files through multipart `POST /api/alarms/sounds`.
 
 Default playback behavior:
 
@@ -198,6 +218,8 @@ Windows PowerShell example:
 $env:ALARM_BELL_COMMAND = 'powershell -NoProfile -Command "[console]::beep(1000,700)"'
 ```
 
+For the live VM deployment, see [`docs-vm-deployment.md`](./docs-vm-deployment.md) for the verified USB audio setup and Docker run flags.
+
 ## API Endpoints
 
 Base URL:
@@ -214,7 +236,10 @@ http://localhost:4000/api
 | `GET` | `/schedule/all` | Returns full and short schedule presets. |
 | `GET` | `/schedule/current` | Returns the schedule for the configured schedule type. |
 | `GET` | `/alarms/config` | Returns current alarm configuration. |
-| `GET` | `/alarms/sounds` | Returns predefined sound presets available to schedules. |
+| `GET` | `/alarms/sounds` | Returns built-in and uploaded custom sounds. |
+| `POST` | `/alarms/sounds` | Uploads a custom sound file via multipart form-data. |
+| `POST` | `/alarms/sounds/update` | Updates custom sound metadata. |
+| `POST` | `/alarms/sounds/delete` | Deletes a custom sound and its file. |
 | `POST` | `/alarms/fire` | Plays the fire alarm immediately. |
 | `POST` | `/alarms/config` | Replaces alarm configuration and restarts scheduler if enabled. |
 | `POST` | `/alarms/schedule-type` | Updates `scheduleType`. |
@@ -260,7 +285,7 @@ curl -X POST http://localhost:4000/api/alarms/config \
 }
 ```
 
-Supported sound types:
+Supported built-in sound types:
 
 - `bell`
 - `hymn`
@@ -309,6 +334,8 @@ On Windows, you can also run:
 
 The default password is `admin123`. If `ADMIN_PASSWORD` is set, use that value instead.
 
+On the live VM deployment, use the value stored in `/home/user/collage-alarm/app/.env.deploy`.
+
 ### Sound does not play
 
 1. Confirm the backend is running on the machine that has access to speakers.
@@ -323,7 +350,18 @@ The default password is `admin123`. If `ADMIN_PASSWORD` is set, use that value i
 
    Then post a lesson for the current minute and check whether `/tmp/collage-alarm-bell-fired` was created. If it was created, scheduling works and the issue is the audio command or environment.
 
-5. For Docker audio, use a Linux host with `/dev/snd` and the `docker-compose.linux-audio.yml` override. On macOS, run the backend directly on the host for actual speaker output.
+5. For Docker audio, use a Linux host with `/dev/snd` and the `docker-compose.linux-audio.yml` override. On the live VM deployment, the backend container must be started with `--device /dev/snd`.
+6. Inside the backend container, verify ALSA sees the USB card:
+
+   ```bash
+   docker exec collage-alarm-backend aplay -l
+   ```
+
+7. For the live VM deployment, direct playback can be checked with:
+
+   ```bash
+   docker exec collage-alarm-backend sh -lc 'ffplay -nodisp -autoexit -loglevel error /app/sounds/test.mp3 >/dev/null 2>&1 || aplay /app/sounds/test.mp3'
+   ```
 
 ### CMake dependency warnings
 
@@ -331,7 +369,8 @@ CMake may print development warnings from fetched dependencies. These warnings d
 
 ## Development Notes
 
-- The backend keeps configuration in memory; it does not persist changes after restart.
+- The backend keeps configuration in memory; it does not persist events or custom sound metadata after restart.
+- Uploaded custom sound files can remain on disk even when their metadata disappears after restart.
 - The scheduler restarts when `/api/alarms/config` is updated.
 - The scheduler checks the local system clock, so host timezone and clock accuracy matter.
 - The frontend stores the login token and role in `localStorage`.

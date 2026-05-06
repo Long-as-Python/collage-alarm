@@ -33,7 +33,7 @@ function load(): DB {
   if (typeof window === "undefined") {
     return {
       sounds: initialSounds, events: initialEvents,
-      airRaid: { enabled: true, alarmSoundId: "s4", volume: 80, testMode: false, autoPauseSchedule: true, autoResumeSchedule: true },
+      airRaid: { enabled: false, apiKey: "", regionId: "", airRaidSoundId: null, fireSoundId: null, playDuringAlert: false, active: false },
       config: { scheduleType: "weekly", defaultVolume: 70, timezone: "Europe/Kyiv", schedulerEnabled: true },
       session: null,
     };
@@ -44,7 +44,7 @@ function load(): DB {
   } catch {}
   const db: DB = {
     sounds: initialSounds, events: initialEvents,
-    airRaid: { enabled: true, alarmSoundId: "s4", volume: 80, testMode: false, autoPauseSchedule: true, autoResumeSchedule: true },
+    airRaid: { enabled: false, apiKey: "", regionId: "", airRaidSoundId: null, fireSoundId: null, playDuringAlert: false, active: false },
     config: { scheduleType: "weekly", defaultVolume: 70, timezone: "Europe/Kyiv", schedulerEnabled: true },
     session: null,
   };

@@ -1,5 +1,7 @@
 # Kubernetes — collage-alarm
 
+> **Status:** these manifests are **not** the current production deployment path. The live instance runs directly on VM `192.168.0.31` with Docker and is exposed through port `33080`. See `../docs-vm-deployment.md` for the real deployed topology and operations notes.
+
 Готові маніфести знаходяться у папці `k8s/`. Структура:
 
 ```

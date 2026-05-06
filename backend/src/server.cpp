@@ -5,6 +5,8 @@
 #include <thread>
 #include <chrono>
 #include <ctime>
+#include <sstream>
+#include <vector>
 
 namespace
 {
@@ -42,6 +44,39 @@ json getStoredSchedule(const json& config, const std::string& scheduleType, cons
   }
 
   return fallback;
+}
+
+std::vector<std::string> splitTags(const std::string& tags)
+{
+  std::vector<std::string> result;
+  std::stringstream stream(tags);
+  std::string item;
+  while (std::getline(stream, item, ','))
+  {
+    const auto start = item.find_first_not_of(" \t\n\r");
+    if (start == std::string::npos)
+    {
+      continue;
+    }
+    const auto end = item.find_last_not_of(" \t\n\r");
+    result.push_back(item.substr(start, end - start + 1));
+  }
+  return result;
+}
+
+std::string multipartValue(const httplib::Request& req, const std::string& key)
+{
+  if (req.has_param(key))
+  {
+    return req.get_param_value(key);
+  }
+
+  if (req.has_file(key))
+  {
+    return req.get_file_value(key).content;
+  }
+
+  return "";
 }
 }
 
@@ -118,9 +153,104 @@ void AppServer::start()
     res.set_content(response.dump(), "application/json");
   });
 
+  server.Post("/api/alarms/sounds", [this](const httplib::Request& req, httplib::Response& res) {
+    if (!req.has_file("file"))
+    {
+      auto response = nlohmann::json{{"success", false}, {"error", "Файл звуку обов'язковий"}};
+      res.status = 400;
+      res.set_content(response.dump(), "application/json");
+      return;
+    }
+
+    const std::string name = multipartValue(req, "name");
+    const std::string description = multipartValue(req, "description");
+    const std::string tagsRaw = multipartValue(req, "tags");
+    const auto file = req.get_file_value("file");
+
+    try
+    {
+      auto sound = alarmService.addCustomSound(name, description, splitTags(tagsRaw), file.filename, file.content);
+      auto response = nlohmann::json{{"success", true}, {"sound", sound}};
+      res.set_content(response.dump(), "application/json");
+    }
+    catch (const std::exception& e)
+    {
+      auto response = nlohmann::json{{"success", false}, {"error", e.what()}};
+      res.status = 400;
+      res.set_content(response.dump(), "application/json");
+    }
+  });
+
+  server.Post("/api/alarms/sounds/update", [this](const httplib::Request& req, httplib::Response& res) {
+    auto payload = nlohmann::json::parse(req.body, nullptr, false);
+    if (payload.is_discarded() || !payload.contains("id") || !payload["id"].is_string()) {
+      auto response = nlohmann::json{{"success", false}, {"error", "Некоректний запит"}};
+      res.status = 400;
+      res.set_content(response.dump(), "application/json");
+      return;
+    }
+
+    try
+    {
+      const std::vector<std::string> tags = payload.contains("tags") && payload["tags"].is_array()
+        ? payload["tags"].get<std::vector<std::string>>()
+        : std::vector<std::string>{};
+      auto sound = alarmService.updateCustomSound(
+        payload["id"].get<std::string>(),
+        payload.value("name", ""),
+        payload.value("description", ""),
+        tags
+      );
+      auto response = nlohmann::json{{"success", true}, {"sound", sound}};
+      res.set_content(response.dump(), "application/json");
+    }
+    catch (const std::exception& e)
+    {
+      auto response = nlohmann::json{{"success", false}, {"error", e.what()}};
+      res.status = 400;
+      res.set_content(response.dump(), "application/json");
+    }
+  });
+
+  server.Post("/api/alarms/sounds/delete", [this](const httplib::Request& req, httplib::Response& res) {
+    auto payload = nlohmann::json::parse(req.body, nullptr, false);
+    if (payload.is_discarded() || !payload.contains("id") || !payload["id"].is_string()) {
+      auto response = nlohmann::json{{"success", false}, {"error", "Некоректний запит"}};
+      res.status = 400;
+      res.set_content(response.dump(), "application/json");
+      return;
+    }
+
+    try
+    {
+      alarmService.deleteCustomSound(payload["id"].get<std::string>());
+      auto response = nlohmann::json{{"success", true}};
+      res.set_content(response.dump(), "application/json");
+    }
+    catch (const std::exception& e)
+    {
+      auto response = nlohmann::json{{"success", false}, {"error", e.what()}};
+      res.status = 400;
+      res.set_content(response.dump(), "application/json");
+    }
+  });
+
   server.Post("/api/alarms/fire", [this](const httplib::Request&, httplib::Response& res) {
     alarmService.playFireAlarm();
     auto response = nlohmann::json{{"success", true}, {"soundType", "fire_alarm"}};
+    res.set_content(response.dump(), "application/json");
+  });
+
+  server.Post("/api/alarms/play", [this](const httplib::Request& req, httplib::Response& res) {
+    auto payload = nlohmann::json::parse(req.body, nullptr, false);
+    if (payload.is_discarded() || !payload.contains("soundType") || !payload["soundType"].is_string()) {
+      auto response = nlohmann::json{{"success", false}, {"error", "Некоректний запит"}};
+      res.status = 400;
+      res.set_content(response.dump(), "application/json");
+      return;
+    }
+    alarmService.triggerManual(payload["soundType"].get<std::string>());
+    auto response = nlohmann::json{{"success", true}, {"soundType", payload["soundType"]}};
     res.set_content(response.dump(), "application/json");
   });
 
@@ -165,7 +295,11 @@ void AppServer::start()
   std::cout << "  GET    /api/schedule/current" << std::endl;
   std::cout << "  GET    /api/alarms/config" << std::endl;
   std::cout << "  GET    /api/alarms/sounds" << std::endl;
+  std::cout << "  POST   /api/alarms/sounds" << std::endl;
+  std::cout << "  POST   /api/alarms/sounds/update" << std::endl;
+  std::cout << "  POST   /api/alarms/sounds/delete" << std::endl;
   std::cout << "  POST   /api/alarms/fire" << std::endl;
+  std::cout << "  POST   /api/alarms/play" << std::endl;
   std::cout << "  POST   /api/alarms/config" << std::endl;
   std::cout << "  POST   /api/alarms/schedule-type" << std::endl;
   std::cout << "  GET    /api/alarms/current" << std::endl;

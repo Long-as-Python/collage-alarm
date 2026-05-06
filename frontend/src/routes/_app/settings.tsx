@@ -35,8 +35,8 @@ function SettingsPage() {
           <Label>Тип розкладу</Label>
           <select value={c.scheduleType} onChange={(e) => patch({ scheduleType: e.target.value as ScheduleType })}
             className="h-10 w-full rounded-md border bg-background px-3 text-sm">
-            <option value="weekly">Тижневий</option>
-            <option value="daily">Щоденний</option>
+            <option value="full">Повний</option>
+            <option value="short">Скорочений</option>
             <option value="custom">Індивідуальний</option>
           </select>
         </div>

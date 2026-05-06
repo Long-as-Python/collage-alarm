@@ -1,0 +1,27 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: collage-alarm-backend:deploy
+    restart: unless-stopped
+    env_file:
+      - ./.env.deploy
+    devices:
+      - /dev/snd:/dev/snd
+    volumes:
+      - /home/user/collage-alarm/sounds:/app/sounds:ro
+
+  web:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+      args:
+        VITE_API_BASE_URL: /api
+        VITE_USE_MOCK: "false"
+    image: collage-alarm-web:deploy
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "33080:80"

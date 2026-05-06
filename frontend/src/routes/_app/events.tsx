@@ -74,14 +74,18 @@ function EventsPage() {
   }
 
   async function handleSubmit(values: any) {
-    if (dialog.editing) {
-      await update.mutateAsync({ id: dialog.editing.id, patch: values });
-      toast.success("Подію оновлено");
-    } else {
-      await create.mutateAsync(values);
-      toast.success("Подію створено");
+    try {
+      if (dialog.editing) {
+        await update.mutateAsync({ id: dialog.editing.id, patch: values });
+        toast.success("Подію оновлено");
+      } else {
+        await create.mutateAsync(values);
+        toast.success("Подію створено");
+      }
+      setDialog({ open: false });
+    } catch (e: any) {
+      toast.error(e?.message ?? "Помилка збереження");
     }
-    setDialog({ open: false });
   }
 
   return (
